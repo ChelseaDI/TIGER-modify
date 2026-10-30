@@ -1,0 +1,98 @@
+% Overleaf 编译器：XeLaTeX
+\documentclass[UTF8,11pt,a4paper]{ctexart}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\ctexset{section={format=\Large\bfseries\raggedright}}
+\pagestyle{plain}
+\begin{document}
+
+\section{EXP2}
+
+在 EXP1 基础上，对组内偏移进行标准；跨组共享倾向，并按组内历史量融合。
+
+\subsection{统一组内差异尺度}
+
+对内容表示的每一维 $k\in\{1,\ldots,d_x\}$，计算组内标准差及标准化偏移：
+\begin{align}
+ \sigma_{g,k}
+ &=\sqrt{\frac{1}{|g|}\sum_{j\in g}(x_{j,k}-\mu_{g,k})^2},\\
+ \hat r_{i,k}
+ &=\frac{x_{i,k}-\mu_{g(i),k}}{\sigma_{g(i),k}+\epsilon},
+ \qquad \epsilon>0.
+\end{align}
+其中，$\epsilon$ 防止除零。
+
+\subsection{局部倾向与跨组共享倾向}
+
+对用户历史中有交互的组计算局部倾向：
+\begin{equation}
+ d_{u,g}^{\mathrm{local}}
+ =\frac{1}{n_{u,g}}\sum_{t\in\mathcal T_{u,g}}\hat r_{i_t},
+ \qquad g\in\mathcal G_u.
+\end{equation}
+对各组等权汇总，得到用户共享倾向：
+\begin{equation}
+ d_u^{\mathrm{shared}}
+ =\frac{1}{m_u}\sum_{g\in\mathcal G_u}d_{u,g}^{\mathrm{local}},
+ \qquad m_u>0.
+\end{equation}
+
+
+\subsection{按组内历史量融合}
+
+定义局部倾向的权重：
+\begin{equation}
+ \lambda_{u,g}=\frac{n_{u,g}}{n_{u,g}+\kappa},\qquad \kappa>0.
+\end{equation}
+融合得到组级偏好：
+\begin{equation}
+ d_{u,g}=
+ \begin{cases}
+ \lambda_{u,g}d_{u,g}^{\mathrm{local}}
+ +(1-\lambda_{u,g})d_u^{\mathrm{shared}}, & n_{u,g}>0,\\
+ d_u^{\mathrm{shared}}, & n_{u,g}=0.
+ \end{cases}
+\end{equation}
+$\kappa$ 为控制共享程度的超参数：当前组历史越多，局部权重越大；历史越少，越依赖共享倾向。仅为 $g\in\mathcal G_u$ 计算。
+
+\subsection{映射及加入组别信息}
+
+将组级决策偏好映射到 T5 隐藏维度：
+\begin{equation}
+ p_{u,g}=W_d d_{u,g},\qquad
+ W_d\in\mathbb R^{h\times d_x}.
+\end{equation}
+设组 $g$ 的 SID 前缀为 $(s_{g,1},s_{g,2})$，以前缀 token 的嵌入构造组别信息：
+\begin{equation}
+ e_g=W_g[E_1(s_{g,1});E_2(s_{g,2})],\qquad
+ W_g\in\mathbb R^{h\times 2h}.
+\end{equation}
+其中，$E_1,E_2$ 输出 $h$ 维嵌入，沿特征维拼接；$W_d,W_g$ 为各组共享的可训练参数。最终组级决策偏好为：
+\begin{equation}
+ m_{u,g}=\operatorname{LayerNorm}(p_{u,g}+e_g)
+ \in\mathbb R^h.
+\end{equation}
+
+\subsection{拼接、训练与解码}
+
+沿用 EXP1：
+\begin{align}
+ Z_u&=\operatorname{Encoder}(X_u^{\mathrm{SID}}),\\
+ \widetilde Z_u^{\mathrm{EXP2}}
+ &=[Z_u;m_{u,g_1}^{\top};\ldots;m_{u,g_{m_u}}^{\top}]
+ \in\mathbb R^{(N_u+m_u)\times h}.
+\end{align}
+组按历史首次出现顺序排列，补齐及其 mask 与 EXP1 一致。
+
+完整 SID 的生成概率与训练损失为：
+\begin{align}
+ P(s_i\mid H_u)
+ &=\prod_{\ell=1}^{L}
+ P(s_{i,\ell}\mid s_{i,<\ell},\widetilde Z_u^{\mathrm{EXP2}}),\\
+ \mathcal L_{\mathrm{gen}}^{\mathrm{EXP2}}
+ &=-\sum_{\ell=1}^{L}
+ \log P(s_\ell^+\mid s_{<\ell}^+,\widetilde Z_u^{\mathrm{EXP2}}).
+\end{align}
+用户组级决策偏好仅由当前样本 target 之前的历史计算。
+
+\end{document}

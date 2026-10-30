@@ -1,0 +1,76 @@
+% Overleaf 编译器：XeLaTeX
+\documentclass[UTF8,11pt,a4paper]{ctexart}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\ctexset{section={format=\Large\bfseries\raggedright}}
+\pagestyle{plain}
+\begin{document}
+
+\section{EXP1}
+
+\subsection{构造物品的组内相对表示}
+
+保留物品输入 RQ-VAE 前的内容表示 $x_i\in\mathbb{R}^{D}$。按 SID 前两个 token 分组：
+\begin{equation}
+ c(i)=(s_{i,1},s_{i,2}),\qquad
+ g_c=\{j\in\mathcal I:c(j)=c\}.
+\end{equation}
+其中，$\mathcal I$ 为可用物品目录，$g_c$ 为前缀 $c$ 对应的语义组。以下用 $g$ 表示一个组，$g(i)$ 表示物品 $i$ 所在组。
+
+计算组均值和物品相对表示：
+\begin{equation}
+ \mu_g=\frac{1}{|g|}\sum_{j\in g}x_j,\qquad
+ r_i=x_i-\mu_{g(i)}.
+\end{equation}
+其中，$|g|$ 为组内物品数，$\mu_g$ 为组内物品的平均内容表示，$r_i$ 描述物品相对组均值的偏移。
+
+\subsection{按语义组汇总用户历史}
+
+获取用户交互历史 $H_u=(i_1,\ldots,i_T)$ 中各物品所属组别，并统计：
+\begin{equation}
+ \mathcal T_{u,g}=\{t:g(i_t)=g\},\qquad
+ n_{u,g}=|\mathcal T_{u,g}|.
+\end{equation}
+其中，$n_{u,g}$ 为用户在组 $g$ 内的历史交互次数。计算各交互组偏移的均值，作为该用户的组级决策偏好：
+\begin{equation}
+ \bar r_{u,g}=\frac{1}{n_{u,g}}
+ \sum_{t\in\mathcal T_{u,g}}r_{i_t},\qquad n_{u,g}>0.
+\end{equation}
+$\bar r_{u,g}$ 为用户的组级决策偏好。各组分别保留，未交互组不构造组级决策偏好。
+
+\subsection{将组级决策偏好拼接到 TIGER 输入}
+
+将各组级决策偏好映射到统一维度：
+\begin{equation}
+ p_{u,g}=W_r\bar r_{u,g},\qquad
+ W_r\in\mathbb R^{h\times D}.
+\end{equation}
+其中，$h$ 为 TIGER 隐藏维度，$W_r$ 为可训练参数。
+
+将 $p_{u,g}$ 拼接至用户历史交互序列后：
+\begin{gather}
+ \mathcal G_u=\{g:n_{u,g}>0\},\qquad m=|\mathcal G_u|,\\
+ X_u=[X_u^{\mathrm{SID}};p_{u,g_1},\ldots,p_{u,g_m}].
+\end{gather}
+其中，$X_u^{\mathrm{SID}}$ 为用户历史交互序列，$m$ 为当前用户交互历史中所涉及组数。训练、验证和测试时均按 group\_id 升序排列组级决策偏好。
+
+\subsection{训练与解码}
+
+将拼接后的用户历史交互记录传入 encoder，与TIGER一致，定义生成任务：
+\begin{gather}
+ Z_u=\operatorname{Encoder}(X_u),\\
+ P(s_i\mid X_u)=\prod_{\ell=1}^{L}
+ P(s_{i,\ell}\mid s_{i,<\ell},Z_u).
+\end{gather}
+其中，$Z_u$ 为编码结果，$L$ 为完整 SID 长度。组级决策偏好从第一个输出 token 起参与生成。
+
+由 ground truth 的 SID 计算训练损失：
+\begin{equation}
+ \mathcal L_{\mathrm{gen}}=-\sum_{\ell=1}^{L}
+ \log P(s^+_\ell\mid s^+_{<\ell},Z_u).
+\end{equation}
+固定内容表示、SID 和组均值，联合训练 $W_r$ 与推荐模型。训练使用真实前序 token，组级决策偏好只由目标之前的历史计算。
+
+推理沿用 TIGER 的生成与搜索规则，保留冲突消解 token，由完整的 SID 得到具体物品。
+
+\end{document}

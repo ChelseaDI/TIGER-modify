@@ -1,0 +1,212 @@
+% !TeX program = xelatex
+% UTF-8 编码。使用完整 TeX Live 或 Overleaf，选择 XeLaTeX 编译。
+% 使用 TeX Live 自带的 Fandol 中文字体，无需额外字体或参考文献文件。
+\documentclass[UTF8,a4paper,zihao=-4,fontset=fandol]{ctexart}
+\usepackage[margin=2.5cm,includehead=false,headheight=0pt,headsep=0pt]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\setlist[enumerate]{leftmargin=2em,itemsep=0.25em,topsep=0.3em}
+\setlength{\parskip}{0.25em}
+\linespread{1.08}
+\ctexset{section={format=\large\bfseries,beforeskip=1.2ex,afterskip=0.6ex}}
+\pagestyle{plain}
+\title{\vspace{-1.5cm}\textbf{生成式推荐中的兴趣与决策倾向}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.6cm}
+
+\section{问题}
+
+生成式推荐中，SID 可视为物品在不同粒度上的语义表征。根据用户历史生成 SID，可以理解为逐步确定用户可能感兴趣的范围，最终得到完整的 SID 对应具体物品。训练和评估通常以实际发生的下一次交互作为目标。但是唯一的 next item 标签不等于唯一的兴趣：
+
+多个物品都可能符合用户当时的兴趣，实际交互只是用户的最终选择。例如，几件用途相近的护肤品都可能符合需求，但用户最终选择哪一件，还可能受到相对价格、质量、流行度等因素的影响。
+
+因此，我觉得其中一个可以进一步研究的问题是：通过分析“在符合用户兴趣的物品范围内，哪些决策倾向影响了用户的最终选择”，来提高模型在 next item prediction 中的精准度。
+
+兴趣用于确定可能感兴趣的物品范围，决策倾向用于解释和预测这一范围内的取舍。将两者区分，研究仅靠兴趣匹配尚未充分解释的选择差异。
+
+\section{决策倾向}
+
+决策倾向指用户在可比物品之间，对不同选择表现出的取舍规律。例如，用户在护肤品、美妆和厨具中，都经常选择同类中相对便宜的产品，那么可能存在跨越不同兴趣的低价倾向。这里的研究对象是选择时对价格的取舍，而非偏好护肤、美妆或厨具这类品类兴趣。
+
+同一用户可能同时考虑多个因素，其重要程度也可能随场景变化。是否存在跨兴趣、跨时间的稳定倾向，应通过历史选择和后续预测检验，不预先为每位用户指定一个固定的主导因素。
+
+\section{初步思路}
+\subsection{}
+既然 SID 能量化物品的语义相似度，那生成的 SID 本质上映射的是用户兴趣偏好，而最终的 next item prediction 其实是决策层面的，应该由用户的决策主导因素来决定（也就是：SID 管兴趣，决策主导因素管最终选择，两者分开）。
+
+\subsection{}
+把这些决策主导因素作为 Transformer 中 QKV 里 Q 的一部分（K 也许也可以），也就是在 transformer 里用上这些主导因素。
+
+\section{评估}
+
+评估仍以 next item prediction 为目标，采用 Recall@$K$ 和 NDCG@$K$。
+
+\section{验证实验}
+
+\subsection{实验设置}
+通过以下实验验证决策因素的存在及重要性：
+
+传统的生成式推荐，如 TIGER，当存在 SID 冲突时会采用各种方式避免，让每个 item 对应的 SID 组合 unique。在我们的既定假设中，SID 其实反映的是用户的兴趣倾向，故冲突的 SID 组合可以认为物品属于同一兴趣大类。比如：
+
+洗发水A 与 洗发水B 通过 RQ-VAE 生成出的 SID 组合均为 (1,2,3)。那在TIGER中，会通过再随机分配一位来避免冲突，如 A(1,2,3,0)，B(1,2,3,1)。
+
+而我们不进行冲突避免的操作，(1,2,3) 表示 A、B都同属洗发水这一兴趣品类。
+
+假定用户 u 的 ground truth 是 A，而模型生成的是 B，由于二者对应的 SID 组合一致（均为(1,2,3)），故认为模型的兴趣偏好判断正确。
+
+但由于实际是 A，而非 B。故，如果此时模型各结果指标相较于有冲突避免时有所提升，则表明最后的错误只是由于我们对用户 u 在做最终决策偏好时的决策因素的判断错误所造成。
+
+这也就论证了决策因素是 GR 在 next item predition 任务中很重要的一环。
+
+\subsection{评估指标及计算}
+
+\paragraph{符号定义}
+设用户 $u$ 的测试目标物品为 $y_u$，
+模型输出的物品排序为
+$P_u=(p_{u,1},p_{u,2},\ldots)$。
+$s(i)$ 表示物品 $i$ 的前 $D$ 层 SID，
+$c(i)$ 表示追加消冲突层后的唯一编码。
+共享同一 SID 的物品构成集合
+\[
+    \mathcal{C}(i)=\{j:s(j)=s(i)\}.
+\]
+其中，$|\mathcal{C}(i)|>1$ 表示该 SID 存在编码冲突。
+
+\paragraph{三种排名}
+对于 \texttt{sid\_nc}，定义：
+\begin{align}
+    r_u^{\mathrm{item}}
+    &= \min\{j:c(p_{u,j})=c(y_u)\},\\
+    r_u^{\mathrm{sid\text{-}item}}
+    &= \min\{j:s(p_{u,j})=s(y_u)\},\\
+    r_u^{\mathrm{sid\text{-}unique}}
+    &= \operatorname{rank}\!\left(
+        s(y_u),
+        \operatorname{UniqueInOrder}
+        [s(p_{u,1}),s(p_{u,2}),\ldots]
+    \right).
+\end{align}
+未匹配时，排名记为 $+\infty$。
+$\operatorname{UniqueInOrder}$ 表示按首次出现顺序去重。
+
+三种排名分别对应：
+\begin{itemize}
+    \item \texttt{item}：精确目标物品的排名；
+    \item \texttt{sid\_at\_item\_rank}：
+    首个与目标共享 SID 的物品位置；
+    \item \texttt{sid\_unique}：
+    将预测物品映射为 SID 并去重后，目标 SID 的排名。
+\end{itemize}
+
+对于 \texttt{sid}，模型直接预测 SID 类，
+以目标 SID 在预测列表中的位置计算
+\texttt{sid/*} 指标。
+其排名单位与 \texttt{sid\_unique} 相同，
+但训练表示和生成过程不同，结果不保证一致。
+
+\paragraph{Recall 与 NDCG}
+对于任意一种排名 $r_u$，
+单个测试样本的指标为：
+\begin{align}
+    \operatorname{Recall@K}(u)
+    &= \operatorname{Hit@K}(u)
+     = \mathbb{I}[r_u\leq K],\\
+    \operatorname{NDCG@K}(u)
+    &=
+    \begin{cases}
+        \dfrac{1}{\log_2(r_u+1)}, & r_u\leq K,\\
+        0, & \text{否则}.
+    \end{cases}
+\end{align}
+其中，$K$ 为评估截断位置，
+$\mathbb{I}[\cdot]$ 为指示函数。
+每个用户只有一个测试目标，因此 Recall 与 Hit 相等；
+NDCG 进一步反映命中位置，目标排名越靠前，得分越高。
+
+\paragraph{SID 命中但物品未命中}
+定义：
+\[
+    \Delta_u@K
+    =
+    \mathbb{I}[r_u^{\mathrm{sid\text{-}item}}\leq K]
+    -
+    \mathbb{I}[r_u^{\mathrm{item}}\leq K].
+\]
+该指标对应 \texttt{sid\_hit\_item\_miss/recall@K}。
+当目标 SID 已在前 $K$ 个物品中出现，
+但精确目标物品未出现时，其值为 1；否则为 0。
+其平均值表示此类情况占测试样本的比例。
+
+\paragraph{计算示例}
+设 $A_1,A_2$ 共享 SID $S_A$，
+$B_1,B_2$ 共享 SID $S_B$，
+$C_1$ 的 SID 为 $S_C$。
+真实目标为 $B_1$，预测排序为：
+\[
+    P_u=(A_1,A_2,B_2,C_1,B_1).
+\]
+对应 SID 序列及其去重结果为：
+\[
+    (S_A,S_A,S_B,S_C,S_B)
+    \;\longrightarrow\;
+    (S_A,S_B,S_C).
+\]
+因此：
+\[
+    r_u^{\mathrm{item}}=5,\qquad
+    r_u^{\mathrm{sid\text{-}item}}=3,\qquad
+    r_u^{\mathrm{sid\text{-}unique}}=2.
+\]
+
+\begin{center}
+\begin{tabular}{lccc}
+    \hline
+    指标 & \texttt{item}
+         & \texttt{sid\_at\_item\_rank}
+         & \texttt{sid\_unique}\\
+    \hline
+    Recall@3 & 0 & 1 & 1\\
+    NDCG@3   & 0 & 0.5 & 0.63093\\
+    Recall@5 & 1 & 1 & 1\\
+    NDCG@5   & 0.38685 & 0.5 & 0.63093\\
+    \hline
+\end{tabular}
+\end{center}
+
+在此例中，$\Delta_u@3=1$：
+同 SID 的 $B_2$ 已进入前 3 位，
+但精确目标 $B_1$ 尚未进入。
+
+\paragraph{分组与汇总}
+设测试用户集合为 $\mathcal{U}$，按目标 SID 类大小划分：
+\begin{align}
+    \mathcal{U}_{\mathrm{all}}
+    &= \mathcal{U},\\
+    \mathcal{U}_{\mathrm{collision}}
+    &= \{u:|\mathcal{C}(y_u)|>1\},\\
+    \mathcal{U}_{\mathrm{singleton}}
+    &= \{u:|\mathcal{C}(y_u)|=1\}.
+\end{align}
+SID 类大小依据整个物品映射计算。
+模型仅预测一遍，每个样本的指标同时计入
+\texttt{all} 和对应子组。
+对任意分组 $\mathcal{V}$，最终指标为：
+\[
+    \overline{M}_{\mathcal{V}}
+    =
+    \frac{1}{|\mathcal{V}|}
+    \sum_{u\in\mathcal{V}}M_u.
+\]
+因此，\texttt{all} 表示整体表现，
+\texttt{collision} 表示目标存在 SID 冲突时的表现，
+\texttt{singleton} 表示目标 SID 唯一时的表现。
+统计单位为测试样本（用户），而非不同物品。
+
+\end{document}

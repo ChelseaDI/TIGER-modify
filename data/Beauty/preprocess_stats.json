@@ -1,0 +1,12 @@
+{
+  "users": 22363,
+  "items": 12101,
+  "interactions": 198502,
+  "min_sequence_length": 5,
+  "mean_sequence_length": 8.876358270357287,
+  "filtered_users": 0,
+  "items_missing_metadata": 0,
+  "min_interactions": 5,
+  "repeated_interactions": "retained",
+  "timestamp_ties": "source order"
+}

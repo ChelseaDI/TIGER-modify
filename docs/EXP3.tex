@@ -1,0 +1,106 @@
+% Overleaf 编译器：XeLaTeX
+\documentclass[UTF8,11pt,a4paper]{ctexart}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\ctexset{section={format=\Large\bfseries\raggedright}}
+\pagestyle{plain}
+\begin{document}
+
+\section{EXP3}
+
+在 EXP2 基础上加入同组内下一物品选择辅助任务，直接监督投影后的组级偏好 $p_{u,g}$ 的区分能力。分组、偏好构造与生成过程沿用 EXP2。
+
+\subsection{组级决策偏好}
+
+修改跨组共享倾向为：
+\begin{equation}
+ \mathcal G_u^{+}=\{g\in\mathcal G_u:|g|>1\},\qquad
+ d_u^{\mathrm{shared}}=
+ \begin{cases}
+ \displaystyle\frac{1}{|\mathcal G_u^{+}|}
+ \sum_{g\in\mathcal G_u^{+}}d_{u,g}^{\mathrm{local}},
+ & |\mathcal G_u^{+}|>0,\\
+ \mathbf 0, & |\mathcal G_u^{+}|=0.
+ \end{cases}
+\end{equation}
+其中，零向量表示缺少有效历史信息。
+
+\subsection{辅助监督任务}
+设当前样本的下一物品为 $y$，其所在组为 $g_y=g(y)$。
+同 EXP2，得组级决策偏好：
+\begin{equation}
+ d_{u,g_y}=
+ \begin{cases}
+ \lambda_{u,g_y}d_{u,g_y}^{\mathrm{local}}
+ +(1-\lambda_{u,g_y})d_u^{\mathrm{shared}},
+ & n_{u,g_y}>0,\\
+ d_u^{\mathrm{shared}}, & n_{u,g_y}=0.
+ \end{cases}
+\end{equation}
+同 EXP2，映射：
+\begin{equation}
+ p_{u,g_y}=W_d d_{u,g_y},\qquad
+ W_d\in\mathbb R^{h\times d_x}.
+\end{equation}
+对于物品 $j$，也将其 embedding 映射至 T5 隐藏维度：
+\begin{equation}
+ v_j=W_v\hat r_j,\qquad
+ W_v\in\mathbb R^{h\times d_x}.
+\end{equation}
+
+故，当前组级决策偏好下，匹配中该组别中物品 j 的分数为：
+\begin{equation}
+ a(u,j\mid g_y)
+ =\frac{1}{\tau}
+ \frac{p_{u,g_y}^{\top}v_j}
+ {\max(\|p_{u,g_y}\|_2,\delta)\max(\|v_j\|_2,\delta)},
+ \qquad \tau,\delta>0.
+\end{equation}
+$\tau$ 为温度，$\delta$ 防止零向量导致除零。
+
+\subsection{辅助监督任务损失函数}
+
+仅对 $|\mathcal G_u^{+}|>0$ 且 $|g_y|>1$ 的样本计算辅助监督任务的损失。
+
+从同组采样其他物品构造候选集（由 $y$ 之前的历史计算）：
+\begin{equation}
+ \varnothing\neq\mathcal N_y\subseteq g_y\setminus\{y\},\qquad
+ \mathcal C_y=\{y\}\cup\mathcal N_y.
+\end{equation}
+$\mathcal N_y$ 为辅助监督任务的负样本。
+
+在候选集内归一化，对于物品 $j$：
+\begin{equation}
+ P_{\mathrm{aux}}(j\mid u,g_y,\mathcal C_y)
+ =\frac{\exp a(u,j\mid g_y)}
+ {\sum_{k\in\mathcal C_y}\exp a(u,k\mid g_y)},
+\end{equation}
+由 ground-truth 进行监督：
+\begin{equation}
+ \ell_{\mathrm{within}}(u,y)
+ =-\log P_{\mathrm{aux}}(y\mid u,g_y,\mathcal C_y).
+\end{equation}
+该损失要求当前得到的组级决策偏好能够区分组别内的物品。
+
+\subsection{训练与推理}
+
+设训练批次为 $\mathcal B$，满足辅助监督任务条件的样本集合为：
+% 修改4：允许目标组未交互，但要求存在有效共享倾向的历史来源。
+\begin{equation}
+ \mathcal B_{\mathrm{aux}}
+ =\{(u,y)\in\mathcal B:|\mathcal G_u^{+}|>0,\ |g_y|>1\}.
+\end{equation}
+联合优化目标：
+\begin{align}
+ \mathcal L_{\mathrm{within}}
+ &=\frac{1}{|\mathcal B_{\mathrm{aux}}|}
+ \sum_{(u,y)\in\mathcal B_{\mathrm{aux}}}\ell_{\mathrm{within}}(u,y),\\
+ \mathcal L_{\mathrm{EXP3}}
+ &=\frac{1}{|\mathcal B|}
+ \sum_{(u,y)\in\mathcal B}\mathcal L_{\mathrm{gen}}^{\mathrm{EXP2}}(u,y)
+ +\alpha\mathcal L_{\mathrm{within}},\qquad \alpha\geq0.
+\end{align}
+若 $\mathcal B_{\mathrm{aux}}=\varnothing$，令 $\mathcal L_{\mathrm{within}}=0$。$\alpha$ 控制辅助任务的监督强度。固定 Sentence-T5 及残差统计时，辅助损失更新 $W_d,W_v$。推理仅保留 EXP2 的生成路径，无需辅助候选采样与评分。
+
+
+\end{document}
